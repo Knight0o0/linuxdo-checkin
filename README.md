@@ -1,174 +1,120 @@
 # LinuxDo 每日签到（每日打卡）
 
-## 项目描述
+自动登录 [LinuxDo](https://linux.do/) 并完成每日签到任务，支持随机浏览帖子、点赞、极低概率自动回复，以及多种推送通知方式。
 
-这个项目用于自动登录 [LinuxDo](https://linux.do/) 网站并随机读取几个帖子。它使用 Python 和 Playwright
-自动化库模拟浏览器登录并浏览帖子，以达到自动签到的功能。
+当前主要实现方式：
+- 使用 **DrissionPage** + **curl_cffi** 进行浏览器自动化和请求伪装
+- 支持 **GitHub Actions** 和 **青龙面板** 定时运行
+- 推送渠道：Telegram / Gotify / Server酱³ / WxPusher（官方接口）
 
-有时会登录失败，重试一下就行了，嫌失败邮件通知烦的可以吧action的邮件通知关了
+**注意**：自动回复概率已调至极低（约 6.5%），回复内容均为常见礼貌短语，旨在轻度增加活跃度。如不需要可直接注释掉相关代码。
 
-## 功能
+## 功能清单
 
-- 自动登录`LinuxDo`。
-- 自动浏览帖子。
-- 每天在`GitHub Actions`中自动运行。
-- 支持`青龙面板` 和 `Github Actions` 自动运行。
-- (可选)`Telegram`通知功能，推送获取签到结果（目前只支持GitHub Actions方式）。
-- (可选)`Gotify`通知功能，推送获取签到结果。
-- (可选)`Server酱³`通知功能，推送获取签到结果。
-- (可选)`wxpush`通知功能，推送获取签到结果。
+- 自动登录 LinuxDo 账号
+- 显示 Connect 信息（连接数、要求等）
+- 随机浏览若干帖子（模拟滚动、随机点赞）
+- 极低概率自动回复（保守短语，避免风控）
+- 支持以下通知渠道（可同时启用多个）：
+  - Telegram
+  - Gotify
+  - Server酱³
+  - WxPusher（标准官方 API）
+
 ## 环境变量配置
 
 ### 必填变量
 
-| 环境变量名称             | 描述                | 示例值                                |
-|--------------------|-------------------|------------------------------------|
-| `LINUXDO_USERNAME` | 你的 LinuxDo 用户名或邮箱 | `your_username` 或 `your@email.com` |
-| `LINUXDO_PASSWORD` | 你的 LinuxDo 密码     | `your_password`                    |
+| 变量名                | 说明                        | 示例值                             |
+|-----------------------|-----------------------------|------------------------------------|
+| `LINUXDO_USERNAME`    | LinuxDo 用户名或邮箱        | `yourname` 或 `xxx@gmail.com`      |
+| `LINUXDO_PASSWORD`    | LinuxDo 登录密码            | `your_password`                    |
 
-~~之前的USERNAME和PASSWORD环境变量仍然可用，但建议使用新的环境变量~~
+**兼容写法**：若未设置以上两个变量，脚本会自动读取旧的 `USERNAME` 和 `PASSWORD`（但建议统一使用新名称）。
 
 ### 可选变量
 
-| 环境变量名称            | 描述                   | 示例值                                    |
-|-------------------|----------------------|----------------------------------------|
-| `GOTIFY_URL`      | Gotify 服务器地址         | `https://your.gotify.server:8080`      |
-| `GOTIFY_TOKEN`    | Gotify 应用的 API Token | `your_application_token`               |
-| `TELEGRAM_TOKEN`  | Telegram Bot Token   | `123456789:ABCdefghijklmnopqrstuvwxyz` |
-| `TELEGRAM_USERID` | Telegram 用户 ID       | `123456789`                            |
-| `SC3_PUSH_KEY`    | Server酱³ SendKey     | `sctpxxxxt`                             |
-| `WXPUSH_URL`      | wxpush 服务器地址         | `https://your.wxpush.server`           |
-| `WXPUSH_TOKEN`    | wxpush 的 token        | `your_wxpush_token`                    |
-| `BROWSE_ENABLED`  | 是否启用浏览帖子功能        | `true` 或 `false`，默认为 `true`           |
+| 变量名                   | 说明                              | 示例值                                      | 备注                             |
+|--------------------------|-----------------------------------|---------------------------------------------|----------------------------------|
+| `BROWSE_ENABLED`         | 是否执行浏览/点赞/回复任务        | `true` / `false` （默认 `true`）            | 关闭后只登录不浏览               |
+| `GOTIFY_URL`             | Gotify 服务器地址                 | `https://push.yourdomain.com`               |                                  |
+| `GOTIFY_TOKEN`           | Gotify 应用 Token                 | `Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`           |                                  |
+| `SC3_PUSH_KEY`           | Server酱³ SendKey                 | `sctxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`         |                                  |
+| `WXPUSHER_APP_TOKEN`     | WxPusher 应用 Token               | `AT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`       | 必须是 AT_ 开头的官方 token     |
+| `WXPUSHER_TOPIC_IDS`     | WxPusher 推送的主题ID（逗号分隔） | `1234,5678,9012`                            | 可同时推送到多个主题             |
+| `TELEGRAM_TOKEN`         | Telegram Bot Token                | `123456789:AAFxxxxxxxxxxxxxxxxxxxxxxxx`     | 通过 @BotFather 获取             |
+| `TELEGRAM_USERID`        | Telegram 接收者 chat_id           | `123456789` 或 `-1001234567890`（群组）     | 通过 @userinfobot 获取           |
 
----
+## 部署方式
 
-## 如何使用
+### 1. GitHub Actions
 
-### GitHub Actions 自动运行
+1. Fork 本仓库
+2. 进入 **Settings → Secrets and variables → Actions → New repository secret**
+3. 添加上述必填 + 你需要的可选变量
+4. 工作流默认每 6 小时运行一次（可修改 `.github/workflows/*.yml` 中的 cron 表达式）
 
-此项目的 GitHub Actions 配置会自动每天运行2次签到脚本。你无需进行任何操作即可启动此自动化任务。GitHub Actions 的工作流文件位于 `.github/workflows` 目录下，文件名为 `daily-check-in.yml`。
+**查看运行日志**：
+- Actions → 选择 `LinuxDo Daily Check-in` → 点开最新运行记录 → 查看 `run_script` 步骤
+- 可看到登录状态、Connect Info、浏览记录、推送结果等
 
-#### 配置步骤
+### 2. 青龙面板（推荐使用 debian 镜像）
 
-1. **设置环境变量**：
-    - 在 GitHub 仓库的 `Settings` -> `Secrets and variables` -> `Actions` 中添加以下变量：
-        - `LINUXDO_USERNAME`：你的 LinuxDo 用户名或邮箱。
-        - `LINUXDO_PASSWORD`：你的 LinuxDo 密码。
-        - (可选) `BROWSE_ENABLED`：是否启用浏览帖子，`true` 或 `false`，默认为 `true`。
-        - (可选) `GOTIFY_URL` 和 `GOTIFY_TOKEN`。
-        - (可选) `SC3_PUSH_KEY`。
-        - (可选) `WXPUSH_URL` 和 `WXPUSH_TOKEN`。
-        - (可选) `TELEGRAM_TOKEN` 和 `TELEGRAM_USERID`。
+**推荐镜像**：`whyour/qinglong:debian` （alpine 版缺少部分依赖，安装 chromium 容易失败）
 
-2. **手动触发工作流**：
-    - 进入 GitHub 仓库的 `Actions` 选项卡。
-    - 选择你想运行的工作流。
-    - 点击 `Run workflow` 按钮，选择分支，然后点击 `Run workflow` 以启动工作流。
+#### 步骤
 
-#### 运行结果
+1. **安装 Python 依赖**
 
-##### 网页中查看
+   青龙面板 → 依赖管理 → Python3 → 一次性安装以下全部依赖：
+DrissionPage==4.1.0.18
+wcwidth==0.2.13
+tabulate==0.9.0
+loguru==0.7.2
+curl-cffi
+beautifulsoup4
+text2. **安装系统依赖（chromium）**
 
-`Actions`栏 -> 点击最新的`Daily Check-in` workflow run -> `run_script` -> `Execute script`
+青龙面板 → 依赖管理 → Linux → 搜索并安装 `chromium`
 
-可看到`Connect Info`：
-（新号可能这里为空，多挂几天就有了）
-![image](https://github.com/user-attachments/assets/853549a5-b11d-4d5a-9284-7ad2f8ea698b)
+若失败，可进入容器手动执行：
 
-### 青龙面板使用
+```bash
+apt update && apt install -y chromium
 
-*注意：如果是docker容器创建的青龙，**请使用`whyour/qinglong:debian`镜像**，latest（alpine）版本可能无法安装部分依赖*
+添加订阅青龙 → 订阅管理 → 新建订阅
+名称：任意（建议：LinuxDo 签到）
+类型：公开仓库
+链接：https://github.com/你的用户名/linuxdo-checkin.git （替换为你的 fork 地址）
+分支：main
+定时规则：0 0 * * * （每天 0 点更新一次上游代码）
 
-1. **依赖安装**
-    - 安装Python依赖
-      - 进入青龙面板 -> 依赖管理 -> 安装依赖
-        - 依赖类型选择`python3`
-        - 自动拆分选择`是`
-        - 名称填写(仓库`requirements.txt`文件的完整内容)：
-            ```
-            DrissionPage==4.1.0.18
-            wcwidth==0.2.13
-            tabulate==0.9.0
-            loguru==0.7.2
-            curl-cffi
-            bs4
-            ```
-        - 点击确定
-    - 安装 linux chromium 依赖
-      - 青龙面板 -> 依赖管理 -> 安装Linux依赖
-      - 名称填`chromium`
-  
-        > 若安装失败，可能需要执行`apt update`更新索引（若使用docker则需进入docker容器执行）
+添加环境变量青龙 → 环境变量 → 新建变量，按上方表格逐一添加
+运行与查看日志订阅拉取完成后 → 定时任务 → 找到对应任务 → 手动运行 → 查看日志
 
+常见问题
+Q：登录总是失败？
+A：常见原因及解决：
 
-2. **添加仓库**
-    - 进入青龙面板 -> 订阅管理 -> 创建订阅
-    - 依次在对应的字段填入内容（未提及的不填）：
-      - **名称**：Linux.DO 签到
-      - **类型**：公开仓库
-      - **链接**：https://github.com/doveppp/linuxdo-checkin.git
-      - **分支**：main
-      - **定时类型**：`crontab`
-      - **定时规则**(拉取上游代码的时间，一天一次，可以自由调整频率): 0 0 * * *
+账号密码错误 → 浏览器手动登录确认
+触发风控 → 等待一段时间或换 IP 再试
+网络问题 → 检查容器/ Actions 网络
+多次运行通常能成功（脚本内置重试）
 
-3. **配置环境变量**
-    - 进入青龙面板 -> 环境变量 -> 创建变量
-    - 需要配置以下变量：
-        - `LINUXDO_USERNAME`：你的LinuxDo用户名/邮箱
-        - `LINUXDO_PASSWORD`：你的LinuxDo密码
-        - (可选) `BROWSE_ENABLED`：是否启用浏览帖子功能，`true` 或 `false`，默认为 `true`
-        - (可选) `GOTIFY_URL`：Gotify服务器地址
-        - (可选) `GOTIFY_TOKEN`：Gotify应用Token
-        - (可选) `SC3_PUSH_KEY`：Server酱³ SendKey
-        - (可选) `WXPUSH_URL`：wxpush服务器地址
-        - (可选) `WXPUSH_TOKEN`：wxpush的token
-        - (可选) `TELEGRAM_TOKEN`：Telegram Bot Token
-        - (可选) `TELEGRAM_USERID`：Telegram用户ID
+Q：Connect Info 一直是空的？
+A：新号需要积累活跃度（发帖、回复、浏览等），多挂几天一般就会显示。
+Q：想完全关闭自动回复？
+A：打开脚本文件，找到 click_one_topic 方法中这一行：
+Pythonif random.random() < 0.065:
+    self.auto_reply(tab)
+注释掉或把 0.065 改成 0.001 即可基本关闭。
+Q：推送失败但签到成功？
+A：推送失败不会影响签到本身，仅记录错误日志。检查对应服务的 Token / URL / ID 是否正确。
+鸣谢
 
-4. **手动拉取脚本**
-    - 首次添加仓库后不会立即拉取脚本，需要等待到定时任务触发，当然可以手动触发拉取
-    - 点击右侧"运行"按钮可手动执行
+DrissionPage 项目
+curl-cffi 提供的指纹伪装能力
+所有提交 issue / PR / 分享经验的朋友
 
-#### 运行结果
-
-##### 青龙面板中查看
-- 进入青龙面板 -> 定时任务 -> 找到`Linux.DO 签到` -> 点击右侧的`日志`
-
-### Gotify 通知
-
-当配置了 `GOTIFY_URL` 和 `GOTIFY_TOKEN` 时，签到结果会通过 Gotify 推送通知。
-具体 Gotify 配置方法请参考 [Gotify 官方文档](https://gotify.net/docs/).
-
-### Server酱³ 通知
-
-当配置了 `SC3_PUSH_KEY` 时，签到结果会通过 Server酱³ 推送通知。
-获取 SendKey：请访问 [Server酱³ SendKey获取](https://sc3.ft07.com/sendkey) 获取你的推送密钥。
-
-### wxpush 通知
-
-当配置了 `WXPUSH_URL` 和 `WXPUSH_TOKEN` 时，签到结果会通过 wxpush 推送通知。
-使用 POST 方式推送，请求地址为 `{WXPUSH_URL}/wxsend`。
-
-### Telegram 通知
-
-可选功能：配置 Telegram 通知，实时获取签到结果。
-
-需要在 GitHub Secrets 中配置：
-- `TELEGRAM_TOKEN`：Telegram Bot Token
-- `TELEGRAM_USERID`：Telegram 用户 ID
-
-获取方法：
-1. Bot Token：与 [@BotFather](https://t.me/BotFather) 对话创建机器人获取
-2. 用户 ID：与 [@userinfobot](https://t.me/userinfobot) 对话获取
-
-未配置时将自动跳过通知功能，不影响签到。
-
-
-## 自动更新
-
-- **Github Actions**：默认状态下自动更新是关闭的，[点击此处](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web/blob/main/README_CN.md#%E6%89%93%E5%BC%80%E8%87%AA%E5%8A%A8%E6%9B%B4%E6%96%B0)
-查看打开自动更新步骤。
-- **青龙面板**：更新是以仓库设置的定时规则有关，按照本文配置，则是每天0点更新一次。
-
-
+最后祝大家签到稳定，早日达到心仪的 Trust Level ～
+最后更新：2026 年 1 月
