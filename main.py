@@ -32,46 +32,43 @@ def retry_decorator(retries=3, min_delay=5, max_delay=10):
                         logger.info(
                             f"将在 {sleep_s:.2f}s 后重试 ({min_delay}-{max_delay}s 随机延迟)"
                         )
-                        time.sleep(sleep_time)
+                        time.sleep(sleep_s)
             return None
         return wrapper
     return decorator
 
 
-# 清理可能干扰 headless 浏览器的环境变量
 os.environ.pop("DISPLAY", None)
 os.environ.pop("DYLD_LIBRARY_PATH", None)
 
-# 账号信息
 USERNAME = os.environ.get("LINUXDO_USERNAME") or os.environ.get("USERNAME")
 PASSWORD = os.environ.get("LINUXDO_PASSWORD") or os.environ.get("PASSWORD")
 
-# 浏览任务开关
-BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in ["false", "0", "off"]
+BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in [
+    "false", "0", "off"
+]
 
-# 通知渠道配置
-GOTIFY_URL    = os.environ.get("GOTIFY_URL")
-GOTIFY_TOKEN  = os.environ.get("GOTIFY_TOKEN")
-SC3_PUSH_KEY  = os.environ.get("SC3_PUSH_KEY")
+GOTIFY_URL = os.environ.get("GOTIFY_URL")
+GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")
+SC3_PUSH_KEY = os.environ.get("SC3_PUSH_KEY")
 
-WXPUSHER_APP_TOKEN    = os.environ.get("WXPUSHER_APP_TOKEN")
+WXPUSHER_APP_TOKEN = os.environ.get("WXPUSHER_APP_TOKEN")
 WXPUSHER_TOPIC_IDS_STR = os.environ.get("WXPUSHER_TOPIC_IDS", "")
 WXPUSHER_TOPIC_IDS = [
     int(tid.strip()) for tid in WXPUSHER_TOPIC_IDS_STR.split(",")
     if tid.strip().isdigit()
 ] if WXPUSHER_TOPIC_IDS_STR else []
 
-TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_USERID  = os.environ.get("TELEGRAM_USERID")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_USERID = os.environ.get("TELEGRAM_USERID")
 
-# 站点相关 URL
 HOME_URL    = "https://linux.do/"
 LOGIN_URL   = "https://linux.do/login"
 SESSION_URL = "https://linux.do/session"
 CSRF_URL    = "https://linux.do/session/csrf"
 
 
-# 自动回复内容池（尽量自然、低调、避免被检测为机器人）
+# 自动回复内容池（低调、自然）
 REPLY_POOL = [
     "感谢分享！学到了",
     "非常有帮助的帖子，收藏了",
@@ -91,8 +88,6 @@ REPLY_POOL = [
     "感谢楼主无私分享！",
     "涨知识了，谢谢",
     "很好的经验贴，学习了",
-    "支持一下，感谢付出",
-    "这个思路很赞！",
 ]
 
 
@@ -129,13 +124,12 @@ class LinuxDoBrowser:
             "Accept-Language": "zh-CN,zh;q=0.9",
         })
 
-        # 用于本轮尽量不重复回复
         self.used_replies = set()
 
     def login(self):
         logger.info("开始登录 Linux.do")
 
-        # 获取 CSRF
+        # Step 1: 获取 CSRF
         logger.info("获取 CSRF token...")
         headers = {
             "User-Agent": self.session.headers["User-Agent"],
@@ -144,7 +138,8 @@ class LinuxDoBrowser:
             "Referer": LOGIN_URL,
         }
         try:
-            r = self.session.get(CSRF_URL, headers=headers, impersonate="chrome130")
+            # 修改：使用 "chrome" 而非具体版本号，让 curl_cffi 自动选择当前支持的最新 Chrome 指纹
+            r = self.session.get(CSRF_URL, headers=headers, impersonate="chrome")
             r.raise_for_status()
             csrf = r.json().get("csrf")
             if not csrf:
@@ -155,7 +150,7 @@ class LinuxDoBrowser:
             logger.error(f"获取 CSRF 失败: {e}")
             return False
 
-        # 登录
+        # Step 2: 登录
         logger.info("提交登录请求...")
         login_headers = headers.copy()
         login_headers.update({
@@ -171,8 +166,9 @@ class LinuxDoBrowser:
         }
 
         try:
+            # 修改：同样使用 "chrome"
             resp = self.session.post(
-                SESSION_URL, data=data, headers=login_headers, impersonate="chrome130"
+                SESSION_URL, data=data, headers=login_headers, impersonate="chrome"
             )
             resp.raise_for_status()
             json_data = resp.json()
@@ -186,7 +182,7 @@ class LinuxDoBrowser:
 
         self.print_connect_info()
 
-        # 同步 cookie 到浏览器
+        # 同步 cookie 到 DrissionPage
         logger.info("同步 cookie 到浏览器...")
         cookies = [
             {"name": k, "value": v, "domain": ".linux.do", "path": "/"}
@@ -196,7 +192,7 @@ class LinuxDoBrowser:
         self.page.get(HOME_URL)
         time.sleep(random.uniform(4, 7))
 
-        # 简单验证是否登录成功
+        # 验证登录状态
         if self.page.ele("@id=current-user") or "avatar" in self.page.html.lower():
             logger.info("登录状态验证通过")
             return True
@@ -237,11 +233,9 @@ class LinuxDoBrowser:
             tab.get(url)
             time.sleep(random.uniform(1.5, 3.5))
 
-            # 随机点赞
             if random.random() < 0.28:
                 self.click_like(tab)
 
-            # 随机回复（更低概率，避免风控）
             if random.random() < 0.065:
                 self.auto_reply(tab)
 
@@ -255,7 +249,6 @@ class LinuxDoBrowser:
 
     def click_like(self, page):
         try:
-            # 寻找未点过的反应按钮
             like_btn = page.ele(".discourse-reactions-reaction-button:not(.has-reacted)")
             if like_btn:
                 like_btn.click(by_js=True)
@@ -268,7 +261,6 @@ class LinuxDoBrowser:
 
     def auto_reply(self, page):
         try:
-            # 尝试定位回复输入框
             editor = (
                 page.ele(".reply-input-container .d-editor-input") or
                 page.ele(".composer .d-editor-input") or
@@ -300,7 +292,7 @@ class LinuxDoBrowser:
             if send_btn:
                 send_btn.click(by_js=True)
                 logger.success(f"回复成功 → {text}")
-                time.sleep(random.uniform(3, 6))   # 等待提交
+                time.sleep(random.uniform(3, 6))
             else:
                 logger.warning("未找到发送按钮")
 
@@ -317,7 +309,6 @@ class LinuxDoBrowser:
                 logger.info("随机提前结束本帖浏览")
                 break
 
-            # 判断是否到底
             at_bottom = page.run_js(
                 "return window.scrollY + window.innerHeight + 200 >= document.body.scrollHeight"
             )
@@ -327,11 +318,11 @@ class LinuxDoBrowser:
 
     def print_connect_info(self):
         try:
-            r = self.session.get("https://connect.linux.do/", impersonate="chrome130")
+            r = self.session.get("https://connect.linux.do/", impersonate="chrome")
             soup = BeautifulSoup(r.text, "html.parser")
             rows = soup.select("table tr")
             data = []
-            for row in rows[1:]:  # 跳过表头
+            for row in rows[1:]:
                 cols = row.select("td")
                 if len(cols) >= 3:
                     data.append([
