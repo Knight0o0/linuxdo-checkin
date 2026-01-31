@@ -2,18 +2,20 @@ name: GitHub Workflow Immortality
 
 on:
   schedule:
-    # run once a month on the first day of the month at 00:20 UTC
-    - cron: '20 0 1 * *'
-  workflow_dispatch: {}
+    - cron: '20 0 1 * *'          # 1st of month 00:20 UTC
+  workflow_dispatch:
 
 jobs:
   keepalive:
-    name: GitHub Workflow Immortality
+    name: Keep scheduled workflows alive
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions: {}               # minimal permissions – good practice
+
     steps:
-      - name: Keep cronjob based triggers of GitHub workflows alive
+      - name: Prevent scheduled workflows from being disabled
         uses: PhrozenByte/gh-workflow-immortality@v1
         with:
           secret: ${{ secrets.ACTIONS_TRIGGER_PAT }}
-          repos: ${{ github.repository }}
+          repos: ${{ github.repository }}     # or list multiple: user/repo1,user/repo2
+          # Optional: only touch workflows with "schedule" in name
+          # workflow_filter: ".*(daily|checkin|cron|schedule).*"
