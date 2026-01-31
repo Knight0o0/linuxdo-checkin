@@ -39,18 +39,17 @@ jobs:
         with:
           python-version: '3.11'   # 建议使用 3.11，更稳定且兼容性好
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (升级 curl-cffi 和 DrissionPage)
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
+          pip install --upgrade curl-cffi DrissionPage
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
             pip install \
-              DrissionPage==4.1.0.18 \
               wcwidth==0.2.13 \
               tabulate==0.9.0 \
               loguru==0.7.2 \
-              curl-cffi \
               beautifulsoup4
           fi
 
@@ -68,7 +67,7 @@ jobs:
           TELEGRAM_USERID:      ${{ secrets.TELEGRAM_USERID }}
         run: python main.py
 
-      # ── Telegram 成功通知 ──
+      # Telegram 成功通知
       - name: Send Telegram Success Notification
         if: success()
         env:
@@ -82,7 +81,7 @@ jobs:
               -d text="✅ <b>LinuxDo 签到成功</b> %0A时间: $(date '+%Y-%m-%d %H:%M UTC') %0A仓库: ${{ github.repository }}"
           fi
 
-      # ── Telegram 失败通知（带更多信息） ──
+      # Telegram 失败通知
       - name: Send Telegram Failure Notification
         if: failure()
         env:
@@ -96,7 +95,7 @@ jobs:
               -d text="❌ <b>LinuxDo 签到失败</b> %0A时间: $(date '+%Y-%m-%d %H:%M UTC') %0A仓库: ${{ github.repository }} %0AJob URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
 
-      # 清理旧的 workflow 运行记录，保留最近 6 次，10 天前的删除
+      # 清理旧运行记录
       - name: Delete old workflow runs
         if: always()
         uses: Mattraks/delete-workflow-runs@v2
