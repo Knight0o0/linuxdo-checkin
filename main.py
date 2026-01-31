@@ -2,7 +2,6 @@
 cron: 0 */6 * * *
 new Env("Linux.Do 签到")
 """
-
 import os
 import random
 import time
@@ -15,7 +14,6 @@ from tabulate import tabulate
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 
-
 def retry_decorator(retries=3, min_delay=5, max_delay=10):
     def decorator(func):
         @functools.wraps(func)
@@ -24,7 +22,7 @@ def retry_decorator(retries=3, min_delay=5, max_delay=10):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    if attempt == retries - 1:  # 最后一次尝试
+                    if attempt == retries - 1:
                         logger.error(f"函数 {func.__name__} 最终执行失败: {str(e)}")
                     logger.warning(
                         f"函数 {func.__name__} 第 {attempt + 1}/{retries} 次尝试失败: {str(e)}"
@@ -34,99 +32,137 @@ def retry_decorator(retries=3, min_delay=5, max_delay=10):
                         logger.info(
                             f"将在 {sleep_s:.2f}s 后重试 ({min_delay}-{max_delay}s 随机延迟)"
                         )
-                        time.sleep(sleep_s)
+                        time.sleep(sleep_time)
             return None
-
         return wrapper
-
     return decorator
 
 
+# 清理可能干扰 headless 浏览器的环境变量
 os.environ.pop("DISPLAY", None)
 os.environ.pop("DYLD_LIBRARY_PATH", None)
 
-USERNAME = os.environ.get("LINUXDO_USERNAME")
-PASSWORD = os.environ.get("LINUXDO_PASSWORD")
-BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in [
-    "false",
-    "0",
-    "off",
-]
-if not USERNAME:
-    USERNAME = os.environ.get("USERNAME")
-if not PASSWORD:
-    PASSWORD = os.environ.get("PASSWORD")
-GOTIFY_URL = os.environ.get("GOTIFY_URL")  # Gotify 服务器地址
-GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")  # Gotify 应用的 API Token
-SC3_PUSH_KEY = os.environ.get("SC3_PUSH_KEY")  # Server酱³ SendKey
-WXPUSH_URL = os.environ.get("WXPUSH_URL")  # wxpush 服务器地址
-WXPUSH_TOKEN = os.environ.get("WXPUSH_TOKEN")  # wxpush 的 token
+# 账号信息
+USERNAME = os.environ.get("LINUXDO_USERNAME") or os.environ.get("USERNAME")
+PASSWORD = os.environ.get("LINUXDO_PASSWORD") or os.environ.get("PASSWORD")
 
-HOME_URL = "https://linux.do/"
-LOGIN_URL = "https://linux.do/login"
+# 浏览任务开关
+BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in ["false", "0", "off"]
+
+# 通知渠道配置
+GOTIFY_URL    = os.environ.get("GOTIFY_URL")
+GOTIFY_TOKEN  = os.environ.get("GOTIFY_TOKEN")
+SC3_PUSH_KEY  = os.environ.get("SC3_PUSH_KEY")
+
+WXPUSHER_APP_TOKEN    = os.environ.get("WXPUSHER_APP_TOKEN")
+WXPUSHER_TOPIC_IDS_STR = os.environ.get("WXPUSHER_TOPIC_IDS", "")
+WXPUSHER_TOPIC_IDS = [
+    int(tid.strip()) for tid in WXPUSHER_TOPIC_IDS_STR.split(",")
+    if tid.strip().isdigit()
+] if WXPUSHER_TOPIC_IDS_STR else []
+
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_USERID  = os.environ.get("TELEGRAM_USERID")
+
+# 站点相关 URL
+HOME_URL    = "https://linux.do/"
+LOGIN_URL   = "https://linux.do/login"
 SESSION_URL = "https://linux.do/session"
-CSRF_URL = "https://linux.do/session/csrf"
+CSRF_URL    = "https://linux.do/session/csrf"
+
+
+# 自动回复内容池（尽量自然、低调、避免被检测为机器人）
+REPLY_POOL = [
+    "感谢分享！学到了",
+    "非常有帮助的帖子，收藏了",
+    "思路很清晰，mark一下",
+    "正好最近也在研究这个，谢谢楼主",
+    "+1 期待后续更新",
+    "干货满满，受教了",
+    "这个方法不错，试试看",
+    "楼主牛啊，膜拜",
+    "简单易懂，适合新手",
+    "已阅，感谢大佬",
+    "顶一下，支持原创",
+    "学习了，谢谢分享经验",
+    "这个坑我也踩过，解法很实用",
+    "mark，回头仔细看",
+    "内容质量很高，建议置顶",
+    "感谢楼主无私分享！",
+    "涨知识了，谢谢",
+    "很好的经验贴，学习了",
+    "支持一下，感谢付出",
+    "这个思路很赞！",
+]
 
 
 class LinuxDoBrowser:
-    def __init__(self) -> None:
+    def __init__(self):
         from sys import platform
-
-        if platform == "linux" or platform == "linux2":
-            platformIdentifier = "X11; Linux x86_64"
+        if platform in ("linux", "linux2"):
+            ua_platform = "X11; Linux x86_64"
         elif platform == "darwin":
-            platformIdentifier = "Macintosh; Intel Mac OS X 10_15_7"
+            ua_platform = "Macintosh; Intel Mac OS X 10_15_7"
         elif platform == "win32":
-            platformIdentifier = "Windows NT 10.0; Win64; x64"
+            ua_platform = "Windows NT 10.0; Win64; x64"
         else:
-            platformIdentifier = "X11; Linux x86_64"
+            ua_platform = "X11; Linux x86_64"
 
         co = (
             ChromiumOptions()
             .headless(True)
             .incognito(True)
             .set_argument("--no-sandbox")
+            .set_argument("--disable-dev-shm-usage")
         )
         co.set_user_agent(
-            f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-        )
-        self.browser = Chromium(co)
-        self.page = self.browser.new_tab()
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Accept-Language": "zh-CN,zh;q=0.9",
-            }
+            f"Mozilla/5.0 ({ua_platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         )
 
-    def login(self):
-        logger.info("开始登录")
-        # Step 1: Get CSRF Token
-        logger.info("获取 CSRF token...")
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+        self.browser = Chromium(co)
+        self.page = self.browser.new_tab()
+
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Accept-Language": "zh-CN,zh;q=0.9",
+        })
+
+        # 用于本轮尽量不重复回复
+        self.used_replies = set()
+
+    def login(self):
+        logger.info("开始登录 Linux.do")
+
+        # 获取 CSRF
+        logger.info("获取 CSRF token...")
+        headers = {
+            "User-Agent": self.session.headers["User-Agent"],
+            "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
             "Referer": LOGIN_URL,
         }
-        resp_csrf = self.session.get(CSRF_URL, headers=headers, impersonate="chrome136")
-        csrf_data = resp_csrf.json()
-        csrf_token = csrf_data.get("csrf")
-        logger.info(f"CSRF Token obtained: {csrf_token[:10]}...")
+        try:
+            r = self.session.get(CSRF_URL, headers=headers, impersonate="chrome130")
+            r.raise_for_status()
+            csrf = r.json().get("csrf")
+            if not csrf:
+                logger.error("未能获取到 CSRF token")
+                return False
+            logger.info(f"CSRF 获取成功: {csrf[:8]}...")
+        except Exception as e:
+            logger.error(f"获取 CSRF 失败: {e}")
+            return False
 
-        # Step 2: Login
-        logger.info("正在登录...")
-        headers.update(
-            {
-                "X-CSRF-Token": csrf_token,
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Origin": "https://linux.do",
-            }
-        )
-
+        # 登录
+        logger.info("提交登录请求...")
+        login_headers = headers.copy()
+        login_headers.update({
+            "X-CSRF-Token": csrf,
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": "https://linux.do",
+        })
         data = {
             "login": USERNAME,
             "password": PASSWORD,
@@ -135,255 +171,286 @@ class LinuxDoBrowser:
         }
 
         try:
-            resp_login = self.session.post(
-                SESSION_URL, data=data, impersonate="chrome136", headers=headers
+            resp = self.session.post(
+                SESSION_URL, data=data, headers=login_headers, impersonate="chrome130"
             )
-
-            if resp_login.status_code == 200:
-                response_json = resp_login.json()
-                if response_json.get("error"):
-                    logger.error(f"登录失败: {response_json.get('error')}")
-                    return False
-                logger.info("登录成功!")
-            else:
-                logger.error(f"登录失败，状态码: {resp_login.status_code}")
-                logger.error(resp_login.text)
+            resp.raise_for_status()
+            json_data = resp.json()
+            if json_data.get("error"):
+                logger.error(f"登录失败: {json_data.get('error')}")
                 return False
+            logger.info("登录成功")
         except Exception as e:
             logger.error(f"登录请求异常: {e}")
             return False
 
-        self.print_connect_info()  # 打印连接信息
+        self.print_connect_info()
 
-        # Step 3: Pass cookies to DrissionPage
-        logger.info("同步 Cookie 到 DrissionPage...")
-
-        # Convert requests cookies to DrissionPage format
-        # Using standard requests.utils to parse cookiejar if possible, or manual extraction
-        # requests.Session().cookies is a specialized object, but might support standard iteration
-
-        # We can iterate over the cookies manually if dict_from_cookiejar doesn't work perfectly
-        # or convert to dict first.
-        # Assuming requests behaves like requests:
-
-        cookies_dict = self.session.cookies.get_dict()
-
-        dp_cookies = []
-        for name, value in cookies_dict.items():
-            dp_cookies.append(
-                {
-                    "name": name,
-                    "value": value,
-                    "domain": ".linux.do",
-                    "path": "/",
-                }
-            )
-
-        self.page.set.cookies(dp_cookies)
-
-        logger.info("Cookie 设置完成，导航至 linux.do...")
+        # 同步 cookie 到浏览器
+        logger.info("同步 cookie 到浏览器...")
+        cookies = [
+            {"name": k, "value": v, "domain": ".linux.do", "path": "/"}
+            for k, v in self.session.cookies.get_dict().items()
+        ]
+        self.page.set.cookies(cookies)
         self.page.get(HOME_URL)
+        time.sleep(random.uniform(4, 7))
 
-        time.sleep(5)
-        try:
-            user_ele = self.page.ele("@id=current-user")
-        except Exception as e:
-            logger.warning(f"登录验证失败: {str(e)}")
+        # 简单验证是否登录成功
+        if self.page.ele("@id=current-user") or "avatar" in self.page.html.lower():
+            logger.info("登录状态验证通过")
             return True
-        if not user_ele:
-            # Fallback check for avatar
-            if "avatar" in self.page.html:
-                logger.info("登录验证成功 (通过 avatar)")
-                return True
-            logger.error("登录验证失败 (未找到 current-user)")
-            return False
         else:
-            logger.info("登录验证成功")
-            return True
+            logger.warning("登录后未检测到用户元素，可能登录失败")
+            return False
 
     def click_topic(self):
-        topic_list = self.page.ele("@id=list-area").eles(".:title")
-        if not topic_list:
-            logger.error("未找到主题帖")
+        if not BROWSE_ENABLED:
+            return True
+
+        try:
+            topics = self.page.ele("@id=list-area").eles("tag:a[class*='title']")
+            if not topics:
+                logger.warning("首页未找到可点击的主题")
+                return False
+
+            selected = random.sample(topics, min(10, len(topics)))
+            logger.info(f"随机选择 {len(selected)} 个帖子进行浏览")
+
+            for topic in selected:
+                href = topic.attr("href")
+                if href and href.startswith("/"):
+                    full_url = "https://linux.do" + href
+                    self.click_one_topic(full_url)
+                elif href and "http" in href:
+                    self.click_one_topic(href)
+
+            return True
+        except Exception as e:
+            logger.error(f"点击主题列表失败: {e}")
             return False
-        logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择10个")
-        for topic in random.sample(topic_list, 10):
-            self.click_one_topic(topic.attr("href"))
-        return True
 
-    @retry_decorator()
-    def click_one_topic(self, topic_url):
-        new_page = self.browser.new_tab()
+    @retry_decorator(retries=2, min_delay=3, max_delay=8)
+    def click_one_topic(self, url):
+        tab = self.browser.new_tab()
         try:
-            new_page.get(topic_url)
-            if random.random() < 0.3:  # 0.3 * 30 = 9
-                self.click_like(new_page)
-            self.browse_post(new_page)
+            tab.get(url)
+            time.sleep(random.uniform(1.5, 3.5))
+
+            # 随机点赞
+            if random.random() < 0.28:
+                self.click_like(tab)
+
+            # 随机回复（更低概率，避免风控）
+            if random.random() < 0.065:
+                self.auto_reply(tab)
+
+            self.browse_post(tab)
+
         finally:
             try:
-                new_page.close()
-            except Exception:
-                pass
-
-    def browse_post(self, page):
-        prev_url = None
-        # 开始自动滚动，最多滚动10次
-        for _ in range(10):
-            # 随机滚动一段距离
-            scroll_distance = random.randint(550, 650)  # 随机滚动 550-650 像素
-            logger.info(f"向下滚动 {scroll_distance} 像素...")
-            page.run_js(f"window.scrollBy(0, {scroll_distance})")
-            logger.info(f"已加载页面: {page.url}")
-
-            if random.random() < 0.03:  # 33 * 4 = 132
-                logger.success("随机退出浏览")
-                break
-
-            # 检查是否到达页面底部
-            at_bottom = page.run_js(
-                "window.scrollY + window.innerHeight >= document.body.scrollHeight"
-            )
-            current_url = page.url
-            if current_url != prev_url:
-                prev_url = current_url
-            elif at_bottom and prev_url == current_url:
-                logger.success("已到达页面底部，退出浏览")
-                break
-
-            # 动态随机等待
-            wait_time = random.uniform(2, 4)  # 随机等待 2-4 秒
-            logger.info(f"等待 {wait_time:.2f} 秒...")
-            time.sleep(wait_time)
-
-    def run(self):
-        try:
-            login_res = self.login()
-            if not login_res:  # 登录
-                logger.warning("登录验证失败")
-
-            if BROWSE_ENABLED:
-                click_topic_res = self.click_topic()  # 点击主题
-                if not click_topic_res:
-                    logger.error("点击主题失败，程序终止")
-                    return
-                logger.info("完成浏览任务")
-
-            self.send_notifications(BROWSE_ENABLED)  # 发送通知
-        finally:
-            try:
-                self.page.close()
-            except Exception:
-                pass
-            try:
-                self.browser.quit()
-            except Exception:
+                tab.close()
+            except:
                 pass
 
     def click_like(self, page):
         try:
-            # 专门查找未点赞的按钮
-            like_button = page.ele(".discourse-reactions-reaction-button")
-            if like_button:
-                logger.info("找到未点赞的帖子，准备点赞")
-                like_button.click()
-                logger.info("点赞成功")
-                time.sleep(random.uniform(1, 2))
+            # 寻找未点过的反应按钮
+            like_btn = page.ele(".discourse-reactions-reaction-button:not(.has-reacted)")
+            if like_btn:
+                like_btn.click(by_js=True)
+                logger.success("点赞成功")
+                time.sleep(random.uniform(0.8, 1.8))
             else:
-                logger.info("帖子可能已经点过赞了")
+                logger.info("该帖可能已点赞或无点赞按钮")
         except Exception as e:
-            logger.error(f"点赞失败: {str(e)}")
+            logger.debug(f"点赞操作异常: {e}")
 
-    def print_connect_info(self):
-        logger.info("获取连接信息")
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        }
-        resp = self.session.get(
-            "https://connect.linux.do/", headers=headers, impersonate="chrome136"
-        )
-        soup = BeautifulSoup(resp.text, "html.parser")
-        rows = soup.select("table tr")
-        info = []
-
-        for row in rows:
-            cells = row.select("td")
-            if len(cells) >= 3:
-                project = cells[0].text.strip()
-                current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
-                info.append([project, current, requirement])
-
-        print("--------------Connect Info-----------------")
-        print(tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
-
-    def send_notifications(self, browse_enabled):
-        status_msg = f"✅每日登录成功: {USERNAME}"
-        if browse_enabled:
-            status_msg += " + 浏览任务完成"
-
-        if GOTIFY_URL and GOTIFY_TOKEN:
-            try:
-                response = requests.post(
-                    f"{GOTIFY_URL}/message",
-                    params={"token": GOTIFY_TOKEN},
-                    json={"title": "LINUX DO", "message": status_msg, "priority": 1},
-                    timeout=10,
-                )
-                response.raise_for_status()
-                logger.success("消息已推送至Gotify")
-            except Exception as e:
-                logger.error(f"Gotify推送失败: {str(e)}")
-        else:
-            logger.info("未配置Gotify环境变量，跳过通知发送")
-
-        if SC3_PUSH_KEY:
-            match = re.match(r"sct(\d+)t", SC3_PUSH_KEY, re.I)
-            if not match:
-                logger.error(
-                    "❌ SC3_PUSH_KEY格式错误，未获取到UID，无法使用Server酱³推送"
-                )
+    def auto_reply(self, page):
+        try:
+            # 尝试定位回复输入框
+            editor = (
+                page.ele(".reply-input-container .d-editor-input") or
+                page.ele(".composer .d-editor-input") or
+                page.ele("css:.composer-textarea")
+            )
+            if not editor:
+                logger.info("未找到回复编辑器，跳过自动回复")
                 return
 
-            uid = match.group(1)
-            url = f"https://{uid}.push.ft07.com/send/{SC3_PUSH_KEY}"
-            params = {"title": "LINUX DO", "desp": status_msg}
+            avail = [r for r in REPLY_POOL if r not in self.used_replies]
+            if not avail:
+                avail = REPLY_POOL[:]
+                self.used_replies.clear()
 
-            attempts = 5
-            for attempt in range(attempts):
-                try:
-                    response = requests.get(url, params=params, timeout=10)
-                    response.raise_for_status()
-                    logger.success(f"Server酱³推送成功: {response.text}")
-                    break
-                except Exception as e:
-                    logger.error(f"Server酱³推送失败: {str(e)}")
-                    if attempt < attempts - 1:
-                        sleep_time = random.randint(180, 360)
-                        logger.info(f"将在 {sleep_time} 秒后重试...")
-                        time.sleep(sleep_time)
+            text = random.choice(avail)
+            self.used_replies.add(text)
 
-        if WXPUSH_URL and WXPUSH_TOKEN:
+            logger.info(f"准备回复: {text}")
+
+            editor.input(text)
+            time.sleep(random.uniform(1.2, 2.4))
+
+            send_btn = (
+                page.ele(".composer .btn-primary") or
+                page.ele("css:button[title*='回复']") or
+                page.ele("text=回复")
+            )
+
+            if send_btn:
+                send_btn.click(by_js=True)
+                logger.success(f"回复成功 → {text}")
+                time.sleep(random.uniform(3, 6))   # 等待提交
+            else:
+                logger.warning("未找到发送按钮")
+
+        except Exception as e:
+            logger.error(f"自动回复失败: {e}")
+
+    def browse_post(self, page):
+        for _ in range(random.randint(6, 12)):
+            scroll_px = random.randint(480, 720)
+            page.run_js(f"window.scrollBy(0, {scroll_px})")
+            time.sleep(random.uniform(1.8, 4.2))
+
+            if random.random() < 0.04:
+                logger.info("随机提前结束本帖浏览")
+                break
+
+            # 判断是否到底
+            at_bottom = page.run_js(
+                "return window.scrollY + window.innerHeight + 200 >= document.body.scrollHeight"
+            )
+            if at_bottom:
+                logger.info("已滚动到底部")
+                break
+
+    def print_connect_info(self):
+        try:
+            r = self.session.get("https://connect.linux.do/", impersonate="chrome130")
+            soup = BeautifulSoup(r.text, "html.parser")
+            rows = soup.select("table tr")
+            data = []
+            for row in rows[1:]:  # 跳过表头
+                cols = row.select("td")
+                if len(cols) >= 3:
+                    data.append([
+                        cols[0].get_text(strip=True),
+                        cols[1].get_text(strip=True) or "0",
+                        cols[2].get_text(strip=True) or "?"
+                    ])
+            if data:
+                print("\n" + "="*40)
+                print("Linux.do Connect 信息")
+                print(tabulate(data, headers=["项目", "当前", "要求"], tablefmt="github"))
+                print("="*40 + "\n")
+        except Exception as e:
+            logger.warning(f"获取 connect 信息失败: {e}")
+
+    def send_notifications(self, success=True):
+        emoji = "✅" if success else "⚠️"
+        msg = f"{emoji} Linux.do 签到 {'成功' if success else '部分完成'} | 用户: {USERNAME}"
+        if BROWSE_ENABLED:
+            msg += " + 浏览/互动任务执行"
+
+        # Gotify
+        if GOTIFY_URL and GOTIFY_TOKEN:
             try:
-                response = requests.post(
-                    f"{WXPUSH_URL}/wxsend",
-                    headers={
-                        "Authorization": WXPUSH_TOKEN,
-                        "Content-Type": "application/json",
-                    },
-                    json={"title": "LINUX DO", "content": status_msg},
-                    timeout=10,
+                requests.post(
+                    f"{GOTIFY_URL}/message?token={GOTIFY_TOKEN}",
+                    json={"title": "Linux.do 签到", "message": msg, "priority": 4},
+                    timeout=10
                 )
-                response.raise_for_status()
-                logger.success(f"wxpush 推送成功: {response.text}")
+                logger.success("Gotify 推送成功")
             except Exception as e:
-                logger.error(f"wxpush 推送失败: {str(e)}")
-        else:
-            logger.info("未配置 WXPUSH_URL 或 WXPUSH_TOKEN，跳过通知发送")
+                logger.error(f"Gotify 推送失败: {e}")
+
+        # Server酱³
+        if SC3_PUSH_KEY:
+            match = re.match(r"sct(\d+)t", SC3_PUSH_KEY, re.I)
+            if match:
+                uid = match.group(1)
+                url = f"https://{uid}.push.ft07.com/send/{SC3_PUSH_KEY}"
+                try:
+                    requests.get(url, params={"title": "Linux.do", "desp": msg}, timeout=10)
+                    logger.success("Server酱³ 推送成功")
+                except Exception as e:
+                    logger.error(f"Server酱³ 推送失败: {e}")
+            else:
+                logger.warning("SC3_PUSH_KEY 格式不正确")
+
+        # WxPusher
+        if WXPUSHER_APP_TOKEN and WXPUSHER_TOPIC_IDS:
+            try:
+                payload = {
+                    "appToken": WXPUSHER_APP_TOKEN,
+                    "content": msg,
+                    "contentType": 1,
+                    "topicIds": WXPUSHER_TOPIC_IDS,
+                    "summary": "Linux.do 签到通知",
+                }
+                r = requests.post(
+                    "https://wxpusher.zjiecode.com/api/send/message",
+                    json=payload, timeout=12
+                )
+                if r.json().get("code") == 1000:
+                    logger.success("WxPusher 推送成功")
+                else:
+                    logger.error(f"WxPusher 返回错误: {r.text}")
+            except Exception as e:
+                logger.error(f"WxPusher 推送异常: {e}")
+
+        # Telegram
+        if TELEGRAM_TOKEN and TELEGRAM_USERID:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+                params = {
+                    "chat_id": TELEGRAM_USERID,
+                    "text": msg,
+                    "disable_web_page_preview": True,
+                }
+                r = requests.get(url, params=params, timeout=10)
+                if r.json().get("ok"):
+                    logger.success("Telegram 推送成功")
+                else:
+                    logger.error(f"Telegram 失败: {r.text}")
+            except Exception as e:
+                logger.error(f"Telegram 推送异常: {e}")
+
+    def run(self):
+        success = False
+        try:
+            if not USERNAME or not PASSWORD:
+                logger.error("缺少用户名或密码")
+                return
+
+            if self.login():
+                if BROWSE_ENABLED:
+                    self.click_topic()
+                success = True
+            else:
+                logger.error("登录失败，无法继续")
+
+            self.send_notifications(success=success)
+
+        except Exception as e:
+            logger.exception(f"主流程异常: {e}")
+            self.send_notifications(success=False)
+        finally:
+            try:
+                self.page.close()
+            except:
+                pass
+            try:
+                self.browser.quit()
+            except:
+                pass
 
 
 if __name__ == "__main__":
     if not USERNAME or not PASSWORD:
-        print("Please set USERNAME and PASSWORD")
-        exit(1)
-    l = LinuxDoBrowser()
-    l.run()
+        print("缺少必要的环境变量：请设置 USERNAME / PASSWORD")
+        sys.exit(1)
+
+    bot = LinuxDoBrowser()
+    bot.run()
